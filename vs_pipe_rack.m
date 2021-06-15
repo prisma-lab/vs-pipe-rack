@@ -38,7 +38,7 @@
  %
  %
 
-function vs_pipe_rack(radius, Nrp, Nsp, tf, fps, online_plot)
+function vs_pipe_rack(radius, Nrp, Nsp, k_dist, rack_length, camera_altitude, tf, fps, online_plot)
 
     if size(radius, 2) < 2
         error('Error. The pipe rack should contain at least two pipes')
@@ -108,8 +108,7 @@ function vs_pipe_rack(radius, Nrp, Nsp, tf, fps, online_plot)
     np = size(radius, 2);
 
     %% PIPE 3D MODEL (in wrf)
-    k_dist = 0.1;
-
+    d_pipe = zeros(np, 1);
     for i=1:np
         if i==1
             d_pipe(i) = 0.0;
@@ -117,19 +116,18 @@ function vs_pipe_rack(radius, Nrp, Nsp, tf, fps, online_plot)
             d_pipe(i) = k_dist*(i-1);
         end
     end
-    %d_pipe = [0 0.1 0.2 0.3];
-    d_pipe
+    
+    d_pipe_e = zeros(np, 1);
     if pipe_model_calib
         d_pipe_e = [0 0.15 0.35 0.50];
     else
         d_pipe_e = d_pipe;
     end
 
-    pipe_length = 10; % Offset between adjacent pipes
     i2m = 0.0254;
     for i=1:np
         P(i).radius = radius(i)*i2m;
-        P(i).length = pipe_length;
+        P(i).length = rack_length;
         P(i).v = iy;
         if i==1
             P(i).p = [P(i).radius;0;P(i).radius]; % A point on the central axis
@@ -140,7 +138,7 @@ function vs_pipe_rack(radius, Nrp, Nsp, tf, fps, online_plot)
     end
         
     rack_width = P(i).p(1) + P(i).radius;
-    rack_length = pipe_length;
+
     
     np = length(P); % Number of pipes
 
@@ -213,9 +211,9 @@ function vs_pipe_rack(radius, Nrp, Nsp, tf, fps, online_plot)
         cam_traj_angle = 4*pi*min(t,tf)/tf; %!!!
         %Initial position: center of the pipe
         %todo: z must be a param
-        cam_p =  [rack_width/2; rack_length/2; 3] + [0.25*cos(cam_traj_angle);0.5*sin(0.5*cam_traj_angle);0.25*sin(cam_traj_angle)];
+        cam_p =  [rack_width/2; rack_length/2; camera_altitude] + [0.25*cos(cam_traj_angle);0.5*sin(0.5*cam_traj_angle);0.25*sin(cam_traj_angle)];
           
-        cam_look_p = [1.0;pipe_length/2;0];
+        cam_look_p = [1.0;rack_length/2;0];
         cam_opt_axis = cam_look_p - cam_p;
         cam_opt_axis  = cam_opt_axis / norm(cam_opt_axis);
         cam_ix = cross(-iy, cam_opt_axis);
@@ -397,7 +395,7 @@ function vs_pipe_rack(radius, Nrp, Nsp, tf, fps, online_plot)
             vs = prf-pri;
             n_vs = norm(vs);
             if n_vs==0
-                disp('ERR: n_vs==0');
+                disp('ERR: n_vs==0, try to increase camera altitude');
             end
             vs = vs / n_vs;
             index_b = 2*Nsp*(i-1);
@@ -413,6 +411,9 @@ function vs_pipe_rack(radius, Nrp, Nsp, tf, fps, online_plot)
                 else
                     ve = [xx;yy]-ps;
                 end
+                
+                
+                %DATA!! MUST BE PREALLOCATED FOR SURE
                 Data(index_b+j).d = d; %Distanza (errore) tra campione su linea stimata e quella "reale"
                 if d==0
                     Data(index_b+j).n = [0;0];
