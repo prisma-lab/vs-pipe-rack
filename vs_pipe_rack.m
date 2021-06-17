@@ -39,11 +39,13 @@
  %
  
  %todo make params
-function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_altitude, v_max, a_max, j_max, w_max, dw_max, ddw_max, fps, online_plot)
+function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_altitude, v_max, a_max, j_max, w_max, dw_max, ddw_max, fps, noise_pixel_std, online_plot)
 
     if size(radius, 2) < 2
         error('Error. The pipe rack should contain at least two pipes')
     end
+    
+    SAVE_VIDEO = false;
     
     close all
     set(0, 'DefaultTextInterpreter', 'none')
@@ -52,10 +54,11 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
     np = size(radius, 2);
     i2m = 0.0254;
     
-    %Simulation config flags
-    discrete_pixel = false;
+    discrete_pixel = true;
     %Gaussian standard distribution of pixel noise
-    noise_pixel_std = 2;
+    if noise_pixel_std == 0 
+        discrete_pixel = false;
+    end
 
     %% CONSTANTS
     ix = [1;0;0];
@@ -91,7 +94,8 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
         Gx, Gx, Gx, ...
         Gfu, Gfv, Gu0, Gv0 };
 
-    ind_act = [1,2,3,4,5,6,7,8,9];
+    %ind_act = [1,2,3,4,5,6,7,8,9];
+    ind_act = [1,2,3,4,5,6];
     l_ind_act = length(ind_act);
 
     %Camera frameerate and calibration
@@ -100,6 +104,7 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
          0.0, 630, 240; 
          0.0, 0.0, 1.0];
     Ke = K;
+    
     % Camera field of view (normalized image plane)
     FoV = [0 720 0 480]; 
     
@@ -123,8 +128,7 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
             d_pipe_e(i) = k_dist_e*(i-1);
         end
     end    
-    d_pipe_e = d_pipe_e + d_pipe;
-        
+    d_pipe_e = d_pipe_e + d_pipe;      
     
     for i=1:np
         P(i).radius = radius(i)*i2m;
@@ -162,8 +166,7 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
         Z = -Z*P(i).length;
         X = X + P(i).p(1) + d_pipe(i);
         Y = Y + P(i).radius;
-        
-        
+                
         hm = surf(X,Y,Z);
         rotate(hm, [1 0 0], 90, [0,0,0])
         %if i>=5
@@ -184,7 +187,6 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
     zlabel('z [m]');
     disp('Processing');
 
-    %TODO:Alloc
     CAM_POSES = [];
     CAM_POSES_EST = [];
     
@@ -202,9 +204,12 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
     Oi = 0;
     
     %Desires poses for camera starting from the middle of the pipe rack
-    Ipts = [ p_i; [ (rack_width/2+1) rack_length/2  camera_altitude] ]; %; [(rack_width/2+1)  (rack_length/2+1) camera_altitude] ];
-    Ots = [ Oi; 0.0;]; % 0];    
+    Ipts = [ p_i; [ (rack_width/2+1) (rack_length/2 +1)  camera_altitude]; [(rack_width/2+1)  (rack_length/2-1) camera_altitude]; [(rack_width/2+1)  (rack_length/2-1) (camera_altitude-0.5)]; p_i  ];
+    Ots = [ Oi; 0.2; -0.2; -0.2; 0];    
+    %Ipts = [ p_i; [ (rack_width/2+1) (rack_length/2 +1)  camera_altitude]];
+    %Ots = [ Oi; 0.2];    
     
+    t = 0;
     for wp=1:size(Ipts,1)-1
     
         tf_i=zeros(4,1);
@@ -215,21 +220,23 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
 
         k = 0;
         time = 0:T:max(tf_i);
-        for t = time
+        for tt = time
              k = k+1;
              for y = 1:1:3
-                 [dp(y,k),dv(y,k),~,~,~] = motion_profile(t, Ipts(wp, y), Ipts(wp+1, y), v_max, a_max, j_max);
+                 [dp(y,k),dv(y,k),~,~,~] = motion_profile(tt, Ipts(wp, y), Ipts(wp+1, y), v_max, a_max, j_max);
              end
-             [O(k),w(k),dw(k),ddw(k),~] = motion_profile(t, Ots(wp), Ots(wp+1), w_max, dw_max, ddw_max);
+             [O(k),w(k),dw(k),ddw(k),~] = motion_profile(tt, Ots(wp), Ots(wp+1), w_max, dw_max, ddw_max);
 
         end
 
-        t = 0;
         for i=1:size(dp,2)
             %% CAMERA Motion
             tic;
             cam_p =  dp(:, i);
-
+            cam_dp = dv(:, i);
+            cam_dw = dw(i);
+            
+            
             cam_look_p = [1.0;rack_length/2;0];
             cam_opt_axis = cam_look_p - cam_p;
             cam_opt_axis  = cam_opt_axis / norm(cam_opt_axis);
@@ -656,6 +663,8 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
             err.time(index) = t;
             err.cam_p(index,:) = cam_p';
             err.cam_pe(index,:) = cam_pe';
+            err.cam_dp(index, :) = cam_dp';
+            err.cam_dw(index) = cam_dw;
             err.eul_cam_R(index,:) = rotm2eul(cam_R)';
             err.eul_cam_Re(index,:) = rotm2eul(cam_Re)';
             err.eul(index,:) = rotm2eul(cam_Re'*cam_R)';
@@ -706,75 +715,112 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
         end
     end
 
-    for p=1:size(CAM_POSES,1)
-        %% Show the pipes in 3D scene
-        figure(3)
-        hold off
-        for i=1:length(P)
-            [X,Y,Z] = cylinder(P(i).radius);
-            Z = -Z*P(i).length;
-            X = X + P(i).p(1) + d_pipe(i);
-            Y = Y + P(i).radius;
-            hm = surf(X,Y,Z);
-            rotate(hm, [1 0 0], 90, [0,0,0])
-            hm.FaceColor = 'flat';
-            hm.EdgeColor = 'none';
-            %hm.FaceAlpha = 0.9;
-            hold on
-            %Show random points
-            for j=1:size(P(i).RP,1)
-                plot3(P(i).RP(j,1),P(i).RP(j,2),P(i).RP(j,3),'b*');
-            end
+    close all;
+    
+    live_plot = false;
+    if live_plot == true
+        if SAVE_VIDEO == true
+            v3d = VideoWriter('video3d.avi');
+            vfeatures = VideoWriter('vfeatures.avi');
+            verror = VideoWriter('verror.avi');
+            v3d.FrameRate = 25;
+            v3d.Quality = 100;
+            vfeatures.FrameRate = 25;
+            vfeatures.Quality = 100;
+            verror.FrameRate = 25;
+            verror.Quality = 100;
+
+            open(v3d);
+            open(vfeatures);
+            open(verror);
         end
-        axis equal
-        xlabel('x [m]');
-        ylabel('y [m]');
-        zlabel('z [m]');
- 
-        cam = plotCamera('AbsolutePose', CAM_POSES(p), 'Opacity', 0.1, 'Size', 0.1, 'AxesVisible', true);
-        cam_e = plotCamera('AbsolutePose', CAM_POSES_EST(p), 'Opacity', 0.5, 'Size', 0.1, 'AxesVisible', false, 'Color', [0 1 0]);
+        
+        for i=1:size(err.cam_p, 1)
+            ne_cam(i) = norm(err.cam_p(i,:) - err.cam_pe(i,:))
+        end
+        size(CAM_POSES)
+        size(err.cam_pe)
+        for p=1:size(CAM_POSES,1)
+            figure(1)
+            hold off
+            for i=1:length(P)
+                [X,Y,Z] = cylinder(P(i).radius);
+                Z = -Z*P(i).length;
+                X = X + P(i).p(1) + d_pipe(i);
+                Y = Y + P(i).radius;
+                hm = surf(X,Y,Z);
+                rotate(hm, [1 0 0], 90, [0,0,0])
+                hm.FaceColor = 'flat';
+                hm.EdgeColor = 'none';
+                hold on
+                %Show random points
+                for j=1:size(P(i).RP,1)
+                    plot3(P(i).RP(j,1),P(i).RP(j,2),P(i).RP(j,3),'b*');
+                end
+            end
+            axis equal
+            xlabel('x [m]');
+            ylabel('y [m]');
+            zlabel('z [m]');
+
+
+            cam = plotCamera('AbsolutePose', CAM_POSES(p), 'Opacity', 0.1, 'Size', 0.1, 'AxesVisible', true);
+            cam_e = plotCamera('AbsolutePose', CAM_POSES_EST(p), 'Opacity', 0.5, 'Size', 0.1, 'AxesVisible', false, 'Color', [0 1 0]);
+
+            if SAVE_VIDEO == true
+                frame = getframe(gcf);
+                writeVideo(v3d,frame);
+            end
             
-        figure(2)
-        hold off
-        grid on
-        for i=1:length(P)
-            plot( [CONT_LEFT(p,i, 1); CONT_LEFT(p,i, 2)], [CONT_LEFT(p,i, 3),CONT_LEFT(p,i, 4)], 'r' );
-            hold on
+            figure(2)
             grid on
-            plot( [CONT_RIGHT(p,i, 1); CONT_RIGHT(p,i, 2)], [CONT_RIGHT(p,i, 3),CONT_RIGHT(p,i, 4)], 'b' );
+            hold off
+
+            for i=1:length(P)
+                plot( [CONT_LEFT(p,i, 1); CONT_LEFT(p,i, 2)], [CONT_LEFT(p,i, 3),CONT_LEFT(p,i, 4)], 'r' );
+                hold on
+                plot( [CONT_RIGHT(p,i, 1); CONT_RIGHT(p,i, 2)], [CONT_RIGHT(p,i, 3),CONT_RIGHT(p,i, 4)], 'b' );
+
+                for f=1:size( Mx, 3 )
+
+                    if( Mx(p,i,f) ~= 0 && My(p,i,f) ~= 0 )
+                        plot( Mx(p,i,f), My(p,i,f), 'b*');
+                    end
+                end       
+                for f=1:size( P2Ex, 3 )
+                    if( P2Ex(p,i,f) ~= 0 && P2Ey(p,i,f) ~= 0 )
+                        plot( P2Ex(p,i,f), P2Ey(p,i,f), 'ro');
+                    end
+                end
+            end
+            axis([0, 600, -100, 600]);
+
+            if SAVE_VIDEO == true 
+                frame2 = getframe(gcf);
+                writeVideo(vfeatures,frame2);
+            end
             
-            size ( Mx )
-            for f=1:size( Mx, 3 )
-                plot( Mx(p,i,f), My(p,i,f), 'b*');
-            end
-                       
-            for f=1:size( P2Ex, 3 )
-                plot( P2Ex(p,i,f), P2Ey(p,i,f), 'ro');
-            end
+            figure(3)
+            %hold on
+            err.cam_p(p,:)
+            plot(ne_cam(1:p), 'r', 'LineWidth', 3);
 
-
+            if SAVE_VIDEO == true
+                frame3 = getframe(gcf);
+                writeVideo(verror,frame3);
+            end
+            
+            pause(T);
         end
-        pause(T);
+        
+        if SAVE_VIDEO == true
+            close(v3d);
+            close(vfeatures);
+            close(verror);
+        end
     end
-    size(CAM_POSES)
-    fprintf('[t = %.3f s] \n', t);
-
-    %Store data for plot
-    err.time(index) = t;
-    err.cam_p(index,:) = cam_p';
-    err.cam_pe(index,:) = cam_pe';
-    err.eul_cam_R(index,:) = rotm2eul(cam_R)';
-    err.eul_cam_Re(index,:) = rotm2eul(cam_Re)';
-    err.eul(index,:) = rotm2eul(cam_Re'*cam_R)';
-    err.nrp(index) = nrp;
-    err.d_pipe_e(index,:) = d_pipe_e;
-    err.d_pipe_err(index,:) = d_pipe-d_pipe_e;
-    err.Ke_params(index,:) = [Ke(1,1) Ke(2,2) Ke(1,3) Ke(2,3)];
-    err.Ke_params_err(index,:) = [K(1,1)-Ke(1,1) K(2,2)-Ke(2,2) K(1,3)-Ke(1,3) K(2,3)-Ke(2,3)];
-
-    %save err
- 
-    %plotErr(err);
+    
+    plotErr(err);
 end
 
 
@@ -790,6 +836,10 @@ function plotErr(err)
     ax=axis; axis([0,err.time(end),ax(3),ax(4)])
     grid on
     set(gcf,'Position', [10 10 300 250])
+    
+%     exportgraphics(gcf,'position_error.eps')
+%     savefig('position_error.fig')
+%     exportgraphics(gcf,'position_error.png')
 
     figure('Name', 'Camera Position')
     plot(err.time, err.cam_p)
@@ -800,15 +850,38 @@ function plotErr(err)
     grid on
     set(gcf,'Position', [10 10 300 250])
 
-    % figure('Name', 'Position and estimate')
-    % plot(err.time, err.cam_p, err.time, err.cam_pe, '--')
-    % xlabel('s');
-    % ylabel('m');
-    % legend('$x$','$y$','$z$','$\bar{x}$','$\bar{y}$','$\bar{z}$','Interpreter','latex')
-    % ax=axis; axis([0,err.time(end),ax(3),ax(4)])
-    % grid on
-    % set(gcf,'Position', [10 10 300 250])
+%     exportgraphics(gcf,'camera_position.eps')
+%     savefig('camera_position.fig')
+%     exportgraphics(gcf,'camera_position.png')
 
+
+    figure('Name', 'Camera Linear Velocity')
+    plot(err.time, err.cam_dp)
+    xlabel('s');
+    ylabel('m/s');
+    legend('$x$','$y$','$z$','Interpreter','latex')
+    ax=axis; axis([0,err.time(end),ax(3),ax(4)])
+    grid on
+    set(gcf,'Position', [10 10 300 250])
+ 
+%     exportgraphics(gcf,'camera_velocity.eps')
+%     savefig('camera_velocity.fig')
+%     exportgraphics(gcf,'camera_velocity.png')
+    
+    figure('Name', 'Camera Angular Velocity')
+    plot(err.time, err.cam_dw)
+    xlabel('s');
+    ylabel('rad/s');
+    legend('$Z$','Interpreter','latex')
+    ax=axis; axis([0,err.time(end),ax(3),ax(4)])
+    grid on
+    set(gcf,'Position', [10 10 300 250])
+
+%     exportgraphics(gcf,'camera_angular_position.eps')
+%     savefig('camera_angular_position.fig')
+%     exportgraphics(gcf,'camera_angular_position.png')
+
+    
     figure('Name', 'Orientation error (Euler ZYX)')
     plot(err.time, err.eul*(180/pi))
     xlabel('s');
@@ -818,6 +891,11 @@ function plotErr(err)
     grid on
     set(gcf,'Position', [10 10 300 250])
 
+%     exportgraphics(gcf,'camera_orientation_error.eps')
+%     savefig('camera_orientation_error.fig')
+%     exportgraphics(gcf,'camera_orientation_error.png')
+
+    
     figure('Name', 'Orientation (Euler ZYX)')
     plot(err.time, err.eul_cam_R*(180/pi))
     xlabel('s');
@@ -827,68 +905,13 @@ function plotErr(err)
     grid on
     set(gcf,'Position', [10 10 300 250])
 
-    % figure('Name', 'Orientation and estimate (Euler ZYX)')
-    % plot(err.time, err.eul_cam_R*(180/pi), err.time, err.eul_cam_Re*(180/pi), '--')
-    % xlabel('s');
-    % ylabel('deg');
-    % legend('$Z$','$Y$','$X$','$\bar{Z}$','$\bar{Y}$','$\bar{X}$','Interpreter','latex')
-    % ax=axis; axis([0,err.time(end),ax(3),ax(4)])
-    % grid on
-    % set(gcf,'Position', [10 10 300 250])
-
+ 
     figure('Name', 'Random (texture) points')
     plot(err.time, err.nrp)
     xlabel('s');
-    %ylabel('Random points');
     ax=axis; axis([0,err.time(end),ax(3),ax(4)])
     grid on
     set(gcf,'Position', [10 10 300 250])
-
-    figure('Name', 'Pipe distances')
-    plot(err.time, err.d_pipe_e(:,2:4))
-    xlabel('s');
-    ylabel('m');
-    legend('$\bar{d}_1$','$\bar{d}_2$','$\bar{d}_3$','Interpreter','latex')
-    ax=axis; axis([0,err.time(end),ax(3),ax(4)])
-    grid on
-    set(gcf,'Position', [10 10 300 250])
-    
-    figure('Name', 'Pipe distance error')
-    plot(err.time, err.d_pipe_err(:,2:4))
-    xlabel('s');
-    ylabel('m');
-    legend('$\bar{d}_1$','$\bar{d}_2$','$\bar{d}_3$','Interpreter','latex')
-    ax=axis; axis([0,err.time(end),ax(3),ax(4)])
-    grid on
-    set(gcf,'Position', [10 10 300 250])
-    
-    figure('Name', 'Camera parameters')
-    plot(err.time, err.Ke_params)
-    xlabel('s');
-    ylabel('Pixel');
-    legend('$f_u$','$f_v$','$u_0$','$v_0$','Interpreter','latex')
-    ax=axis; axis([0,err.time(end),ax(3),ax(4)])
-    grid on
-    set(gcf,'Position', [10 10 300 250])
-    
-    figure('Name', 'Camera focal lenght ext err')
-    plot(err.time, err.Ke_params_err(:,1), err.time, err.Ke_params_err(:,2))
-    xlabel('s');
-    ylabel('Pixel');
-    legend('$f_u$','$f_v$','Interpreter','latex')
-    ax=axis; axis([0,err.time(end),ax(3),ax(4)])
-    grid on
-    set(gcf,'Position', [10 10 300 250])
-
-    figure('Name', 'Camera optical center ext err')
-    plot(err.time, err.Ke_params_err(:,3), err.time, err.Ke_params_err(:,4))
-    xlabel('s');
-    ylabel('Pixel');
-    legend('$u_0$','$v_0$','Interpreter','latex')
-    ax=axis; axis([0,err.time(end),ax(3),ax(4)])
-    grid on
-    set(gcf,'Position', [10 10 300 250])
-
     
     set(0, 'DefaultTextInterpreter', 'none')
 end
