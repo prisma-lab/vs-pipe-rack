@@ -3,15 +3,26 @@
  %   vs_pipe_rack(radius, Nrp, tf, fps, online_plot):
  %          - radius: a vector containing the radius of each pipe of the pipe-rack. Must contain at least two elements
  %          - Nrp: number of random feature points generated over the pipes
+ %          - Nsp: number of features used falling on the detected edges          
+ %          - k_dist: distance between the pipes
+ %          - k_dist_e: error on the known between the pipes
+ %          - rack_length: the length of the complete pipe rack
+ %          - camera_altitude: initial camera altitude over the pipe rack
+ %          - v_max/a_max/j_max: maximum linear velocity, acceleration and
+ %          jerk for the camera motion
+ %          - dw_max/ddw_max: maximum angular velocity and acceleration for
+ %          the camera motion
  %          - fps: the framerate of the camera 
- %          - online_plot: generate visual plot online: be careful, if this
- %          is true, the framerate of the camera will not be guaranteed
- %          - TODO: add other params 
- 
- 
+ %          - noise_pixel_std: Gaussian noise over pixel precision
+ %          - live_plot: boolean flag to display detection results in live
+ %          plots
+ %  HINT: Use the load_param.m script to laod default parameters to  test
+ %  the vs_pipe_rack function.
+  
  % Copyright (C) 2021, Prisma Lab, university of Naples Federico II,
  % Authors: Vincenzo Lippiello, Jonathan Cacace.
  % Emails: vincenzo.lippiello@unina.it, jonathan.cacace@unina.it
+ % MIT License
  %
  % Redistribution and use in source and binary forms, with or without
  % modification, are permitted provided that the following conditions are met:
@@ -36,10 +47,8 @@
  % ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  % POSSIBILITY OF SUCH DAMAGE.
  %
- %
- 
- %todo make params
-function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_altitude, v_max, a_max, j_max, w_max, dw_max, ddw_max, fps, noise_pixel_std, online_plot)
+
+function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_altitude, v_max, a_max, j_max, w_max, dw_max, ddw_max, fps, noise_pixel_std, live_plot)
 
     if size(radius, 2) < 2
         error('Error. The pipe rack should contain at least two pipes')
@@ -206,8 +215,6 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
     %Desires poses for camera starting from the middle of the pipe rack
     Ipts = [ p_i; [ (rack_width/2+1) (rack_length/2 +1)  camera_altitude]; [(rack_width/2+1)  (rack_length/2-1) camera_altitude]; [(rack_width/2+1)  (rack_length/2-1) (camera_altitude-0.5)]; p_i  ];
     Ots = [ Oi; 0.2; -0.2; -0.2; 0];    
-    %Ipts = [ p_i; [ (rack_width/2+1) (rack_length/2 +1)  camera_altitude]];
-    %Ots = [ Oi; 0.2];    
     
     t = 0;
     for wp=1:size(Ipts,1)-1
@@ -255,13 +262,6 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
             CAM_POSES = [CAM_POSES; rigid3d(cam_R, cam_p')];
             CAM_POSES_EST = [CAM_POSES_EST; rigid3d(cam_Re, cam_pe')];
 
-            %if online_plot
-            %   cam_pose = rigid3d(cam_R, cam_p');
-            %   cam = plotCamera('AbsolutePose', cam_pose, 'Opacity', 0.1, 'Size', 0.1, 'AxesVisible', true);
-            %   cam_pose_e = rigid3d(cam_Re, cam_pe');
-            %   cam_e = plotCamera('AbsolutePose', cam_pose_e, 'Opacity', 0.5, 'Size', 0.1, 'AxesVisible', false, 'Color', [0 1 0]);
-            %end
-
             %% Compute and highlight the visible contours from the camera
             for i=1:np
                 %REAL
@@ -280,18 +280,12 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
 
                 P(i).pil = pt1 - P(i).v * P(i).length/2;
                 P(i).pfl = pt1 + P(i).v * P(i).length/2;
-                pl = [P(i).pil';P(i).pfl'];
-                if online_plot
-                    plot3(pl(:,1),pl(:,2),pl(:,3),ci,'Linewidth', 3);
-                end
-
+                pl = [P(i).pil';P(i).pfl'];             
+                
                 P(i).pir = pt2 - P(i).v * P(i).length/2;
                 P(i).pfr = pt2 + P(i).v * P(i).length/2;
                 pl = [P(i).pir';P(i).pfr'];
-                if online_plot
-                    plot3(pl(:,1),pl(:,2),pl(:,3),ci,'Linewidth', 3);
-                end
-
+         
                 %ESTIMATED
                 %Calcolo punti di passaggio delle due rette visibili ai lati della pipe
                 p0c = cam_p - (P(i).p + [d_pipe_e(i);0;0]);
@@ -312,10 +306,7 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
             end
 
             %% CAMERA VIEW
-            if online_plot
-                figure(2)
-                hold off
-            end
+            
             
             Pc = K*[cam_R' -cam_R'*cam_p];
             Pce = Ke*[cam_Re' -cam_Re'*cam_pe];
@@ -333,10 +324,7 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
                 [pix,piy,pfx,pfy] = ApplyFoV(mixt,miyt,mfxt,mfyt,FoV);
                 %Plot segment
                 ci = ce(mod(i,2)+1);
-                if online_plot
-                    plot([pix;pfx],[piy;pfy],ci)
-                    hold on
-                end
+            
                 CONT_LEFT(itr, i, 1) = pix;
                 CONT_LEFT(itr, i, 2) = pfx;
                 CONT_LEFT(itr, i, 3) = piy;
@@ -353,9 +341,7 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
                 [pix,piy,pfx,pfy] = ApplyFoV(mixt,miyt,mfxt,mfyt,FoV);
                 %Plot segment
                 ci = ce(mod(i,2)+1);
-                if online_plot
-                    plot([pix;pfx],[piy;pfy],ci)
-                end
+             
                 CONT_RIGHT(itr, i, 1) = pix;
                 CONT_RIGHT(itr, i, 2) = pfx;
                 CONT_RIGHT(itr, i, 3) = piy;
@@ -369,18 +355,11 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
                         if IsInFoV(m,FoV)
                             Mx(itr, i, j) = m(1);
                             My(itr, i, j) = m(2);
-                            if online_plot
-                                plot(m(1),m(2),'b*');
-                            end
+                          
                         end
                     end
                 end
-                if online_plot
-                    axis equal
-                    grid on
-                    axis(FoV);
-                    %title(sprintf('Camera image (time %.3f s)', t));
-                end
+               
 
             %Plot the estimated scene
             clear Data
@@ -409,11 +388,7 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
                     disp('Error: isempty(pix) || isempty(piy) || isempty(pfx) ||isempty(pfy)');
                 end
                 ci = ce(mod(i,2)+1);
-                if online_plot
-                    plot([pix;pfx],[piy;pfy],sprintf('--%s',ci))
-                    hold on
-                end
-
+            
                 %Find corresponding sample points
                 pri = [pix;piy];
                 prf = [pfx;pfy];
@@ -427,9 +402,7 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
                 for j=1:Nsp
                     ps = pri + (j * n_vs/(Nsp+1)) * vs; %sample point su linea stimata ([u_tilde,v_tilde])
                     [xx, yy, d] = pDistance(ps(1), ps(2), prix, priy, prfx, prfy); %sample point su linea "reale" ([u_tilde,v_tilde])
-                    if online_plot
-                        plot([ps(1);xx], [ps(2);yy], ci);
-                    end
+                 
                     if discrete_pixel
                         ve = round([xx;yy]+[normrnd(0,noise_pixel_std);normrnd(0,noise_pixel_std)])-round(ps);
                         d = norm(ve);
@@ -495,9 +468,8 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
                 pfy = pfr(2)/pfr(3);
                 [pix,piy,pfx,pfy] = ApplyFoV(pix,piy,pfx,pfy,FoV);
                 ci = ce(mod(i,2)+1);
-                if online_plot
-                    plot([pix;pfx],[piy;pfy],sprintf('--%s',ci))
-                end
+               
+                
                 %Find corresponding sample points
                 pri = [pix;piy];
                 prf = [pfx;pfy];
@@ -511,9 +483,8 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
                 for j=1:Nsp
                     ps = pri + (j * n_vs/(Nsp+1)) * vs;
                     [xx, yy, d] = pDistance(ps(1), ps(2), prix, priy, prfx, prfy);
-                    if online_plot
-                        plot([ps(1);xx], [ps(2);yy], ci);
-                    end
+                   
+                    
                     if discrete_pixel
                         ve = round([xx;yy]+[normrnd(0,noise_pixel_std);normrnd(0,noise_pixel_std)])-round(ps);
                         d = norm(ve);
@@ -573,9 +544,7 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
                         nrp = nrp + 1;
                         P2Ex(itr, i, j) = p2e(1);
                         P2Ey(itr, i, j) = p2e(2);
-                        if online_plot
-                            plot(p2e(1),p2e(2),'ro');
-                        end
+                       
                         %Error
                         index_b = index_b+1;
                         if discrete_pixel
@@ -716,8 +685,6 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
     end
 
     close all;
-    
-    live_plot = false;
     if live_plot == true
         if SAVE_VIDEO == true
             v3d = VideoWriter('video3d.avi');
@@ -736,7 +703,7 @@ function vs_pipe_rack(radius, Nrp, Nsp, k_dist, k_dist_e, rack_length, camera_al
         end
         
         for i=1:size(err.cam_p, 1)
-            ne_cam(i) = norm(err.cam_p(i,:) - err.cam_pe(i,:))
+            ne_cam(i) = norm(err.cam_p(i,:) - err.cam_pe(i,:));
         end
         size(CAM_POSES)
         size(err.cam_pe)

@@ -13,4 +13,4 @@ dw_max = 1.0;
 ddw_max = 1.0;
 fps = 25.0;
 noise_pixel_std = 0.0;
-online_plot = false;
+live_plot = false;
